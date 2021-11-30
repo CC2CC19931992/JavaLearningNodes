@@ -504,3 +504,123 @@ public class PersonProxy{ }
 </aop:config>
 ```
 
+
+
+##### 7.Spring事务
+
+###### 0.事务概述
+
+事务四个特性以及事务四个隔离级别文档：
+https://www.cnblogs.com/limuzi1994/p/9684083.html
+
+* 事务是数据库操作最基本单位，要么都成功，要么都失败。
+
+* 典型场景：转账
+
+* 事务四个特性ACID：
+  * 原子性：原子性是指事务包含的所有操作要么全部成功，要么全部失败回滚，因此事务的操作如果成功就必须要完全应用到数据库，如果操作失败则不能对数据库有任何影响
+  * 一致性：一致性是指事务必须使数据库从一个一致性状态变换到另一个一致性状态，也就是说一个事务执行之前和执行之后都必须处于一致性状态。举例来说，假设用户A和用户B两者的钱加起来一共是1000，那么不管A和B之间如何转账、转几次账，事务结束后两个用户的钱相加起来应该还得是1000，这就是事务的一致性。
+  * 隔离性：隔离性是当多个用户并发访问数据库时，比如同时操作同一张表时，数据库为每一个用户开启的事务，不能被其他事务的操作所干扰，多个并发事务之间要相互隔离。关于事务的隔离性数据库提供了多种隔离级别，稍后会介绍到。
+  * 持久性：持久性是指一个事务一旦被提交了，那么对数据库中的数据的改变就是永久性的，即便是在数据库系统遇到故障的情况下也不会丢失提交事务的操作。例如我们在使用JDBC操作数据库时，在提交事务方法后，提示用户事务操作完成，当我们程序执行完成直到看到提示后，就可以认定事务已经正确提交，即使这时候数据库出现了问题，也必须要将我们的事务完全执行完成。否则的话就会造成我们虽然看到提示事务处理完毕，但是数据库因为故障而没有执行事务的重大错误。这是不允许的。
+
+* Spring事务管理有两种方式：**编程式事务管理** 和 **声明式事务管理**，一**般使用声明式事务管理，底层使用AOP原理**。编程式太不方便啦，每个事务方法里都要写代码实现事务。
+
+* 声明式事务管理有两种方式：基于**xml**配置方式 和 基于**注解**方式，一般使用注解方式。
+
+* Spring事务管理提供了一个接口，叫做**事务管理器**，这个接口针对不同的框架提供不同的实现类。
+
+  对于使用JdbcTemplate进行数据库交互，则使用DataSourceTransactionManager实现类，如果整合Hibernate框架则使用HibernateTransactionManager实现类，具体情况具体使用。
+
+###### 1.Spring事务操作
+
+a.bean文件中创建事务管理器
+
+b.在Spring配置文件中开启事务注解,需要引入名称空间tx
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:aop="http://www.springframework.org/schema/aop"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/context
+       http://www.springframework.org/schema/context/spring-context.xsd
+       http://www.springframework.org/schema/aop
+       http://www.springframework.org/schema/aop/spring-aop.xsd
+       http://www.springframework.org/schema/tx
+       http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+    <!-- 开启注解扫描 -->
+    <context:component-scan base-package="com.spring"></context:component-scan>
+
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource"
+          destroy-method="close">
+        <property name="url" value="jdbc:mysql://10.0.31.30:6606/rms_base" />
+        <property name="username" value="root" />
+        <property name="password" value="Ccinn@123456" />
+        <property name="driverClassName" value="com.mysql.jdbc.Driver" />
+    </bean>
+
+    <!-- JdbcTemplate 对象 -->
+    <bean id="jdbcTemplate" class="org.springframework.jdbc.core.JdbcTemplate">
+        <!--注入 dataSource-->
+        <property name="dataSource" ref="dataSource"></property><!--set方式注入-->
+    </bean>
+
+    <!--创建事务管理器-->
+    <bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <!--注入数据源-->
+        <property name="dataSource" ref="dataSource"/>
+    </bean>
+
+      <!--开启事务注解-->
+    <tx:annotation-driven transaction-manager="transactionManager"></tx:annotation-driven>
+
+</beans>
+```
+
+c.在Service类里面方法上加事务注解 @Transactional.
+
+- 如果把@Transactional添加在类上面，这个类里面所有方法都添加事务。
+- 如果只是添加在方法上面，则只为这个方法添加事务。
+
+###### 2.声明式事务管理的参数配置
+
+1. **propagation**：事务传播行为，总共有7种，这一块讲的不是很清楚
+
+2. **isolation**：事务隔离级别
+
+   有三个读问题：脏读，不可重复读，虚读（幻读）。
+
+   设置隔离级别，解决读问题：
+
+| 隔离级别                    | 脏读 | 不可重复读 | 幻读 |
+| --------------------------- | ---- | ---------- | ---- |
+| READ UNCOMMITED（读未提交） | 有   | 有         | 有   |
+| READ COMMITED（读已提交）   | 无   | 有         | 有   |
+| REPEATABLE READ（可重复读） | 无   | 无         | 有   |
+| SERIALIZABLE（串行化）      | 无   | 无         | 无   |
+
+​	3.**timeout**：超时时间
+
+- 事务需要在一定时间内进行提交，超过时间后回滚。
+- 默认值是-1，设置时间以秒为单位
+
+   4.**readOnly**：是否只读
+
+- 默认值为false，表示可以查询，也可以增删改。
+- 设置为true，只能查询。
+
+   4.**rollbackFor**：回滚，设置出现哪些异常进行事务回滚。
+
+   5.**noRollbackFor**：不回滚，设置出现哪些异常不进行事务回滚。
+
+```java
+@Service
+@Transactional(propagation = Propagation.REQUIRED,isolation = Isolation.READ_COMMITTED)
+public class AccountService {
+```
+
