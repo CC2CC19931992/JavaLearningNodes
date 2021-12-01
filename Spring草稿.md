@@ -523,7 +523,7 @@ https://www.cnblogs.com/limuzi1994/p/9684083.html
   * 隔离性：隔离性是当多个用户并发访问数据库时，比如同时操作同一张表时，数据库为每一个用户开启的事务，不能被其他事务的操作所干扰，多个并发事务之间要相互隔离。关于事务的隔离性数据库提供了多种隔离级别，稍后会介绍到。
   * 持久性：持久性是指一个事务一旦被提交了，那么对数据库中的数据的改变就是永久性的，即便是在数据库系统遇到故障的情况下也不会丢失提交事务的操作。例如我们在使用JDBC操作数据库时，在提交事务方法后，提示用户事务操作完成，当我们程序执行完成直到看到提示后，就可以认定事务已经正确提交，即使这时候数据库出现了问题，也必须要将我们的事务完全执行完成。否则的话就会造成我们虽然看到提示事务处理完毕，但是数据库因为故障而没有执行事务的重大错误。这是不允许的。
 
-* Spring事务管理有两种方式：**编程式事务管理** 和 **声明式事务管理**，一**般使用声明式事务管理，底层使用AOP原理**。编程式太不方便啦，每个事务方法里都要写代码实现事务。
+* Spring事务管理有两种方式：**编程式事务管理** 和 **声明式事务管理**，一**般使用声明式事务管理，底层使用AOP原理**。编程式太不方便，每个事务方法里都要写代码实现事务。
 
 * 声明式事务管理有两种方式：基于**xml**配置方式 和 基于**注解**方式，一般使用注解方式。
 
@@ -587,14 +587,97 @@ c.在Service类里面方法上加事务注解 @Transactional.
 - 如果把@Transactional添加在类上面，这个类里面所有方法都添加事务。
 - 如果只是添加在方法上面，则只为这个方法添加事务。
 
-###### 2.声明式事务管理的参数配置
+###### 2.分析spring事务@Transactional注解在同一个类中的方法之间调用不生效的原因及解决方案
 
-1. **propagation**：事务传播行为，总共有7种，这一块讲的不是很清楚
+```java
+@Service
+public class UserService {
+
+    @Autowired
+    private UserDao userDao;
+
+    @Autowired
+    private UserService userService;
+
+    //花钱
+    @Transactional(propagation = Propagation.REQUIRED)
+    public void reduceMoney() {
+        userDao.reduceMoney();
+        try {
+            userService.addMoney();
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    }
+
+    //赚钱
+    @Transactional(propagation = Propagation.NEVER)
+    public void addMoney() {
+        userDao.addMoney();
+        //int i = 10/0;
+    }
+}
+```
+
+**问题：**
+
+在Spring管理的项目中，方法addMoney使用了Transactional注解，试图实现事务性。但当同一个class中的方法reduceMoney调用方法addMoney时，会发现方法addMoney中的事务注解没生效(根据事务传播性为NEVER,而reduceMoney又有事务标记)，也即addMoney事务注解失效了。
+
+spring的@Transactional事务生效的一个前提是进行方法调用前经过拦截器TransactionInterceptor，也就是说只有通过TransactionInterceptor拦截器的方法才会被加入到spring事务管理中，查看spring源码可以看到，在AdvisedSupport.getInterceptorsAndDynamicInterceptionAdvice方法中会从调用方法中获取@Transactional注解，如果有该注解，则启用事务，否则不启用。
+
+这个方法是通过spring的AOP类CglibAopProxy的内部类DynamicAdvisedInterceptor调用的，而DynamicAdvisedInterceptor继承了MethodInterceptor，用于拦截方法调用，并从中获取调用链。
+
+如果是在同一个类中的方法调用，则不会被方法拦截器拦截到，因此事务不会起作用，必须将方法放入另一个类，并且该类通过spring注入。
+
+**原因：**
+
+Transactional是Spring提供的事务管理注解。
+重点在于，Spring采用**AOP**实现对bean的管理和切片，**它为我们的每个class生成一个代理对象**。**只有在代理对象之间进行调用时，可以触发切面逻辑**。而在同一个class中，方法B调用方法A，调用的是原对象的方法，**而不通过代理对象**。所以Spring无法切到这次调用，也就无法**通过注解保证事务性了**。**也就是说，在同一个类中的方法调用，则不会被方法拦截器拦截到，因此事务不会起作用**。
+
+**解决方案：**
+
+* 将事务方法放到另一个类中（或者单独开启一层，取名“事务层”）进行调用，即符合了在对象之间调用的条件
+
+* 获取本对象的代理对象，再进行调用。具体操作如：
+
+  1) Spring-content.xml上下文中，增加配置：<aop:aspectj-autoproxy expose-proxy="true"/>
+
+  2) 在xxxServiceImpl中，用(xxxService)(AopContext.currentProxy())，获取到xxxService的代理类，再调用事务方法，强行经过代理类，激活事务切面。
+
+* 用@Autowired 注入自己 然后在用注入的bean调用自己的方法也可以
+
+###### 3.声明式事务管理的参数配置
+
+1. **propagation**：事务传播行为，总共有7种
+
+   什么叫**事务传播行为**？听起来挺高端的，其实很简单。 
+   即然是传播，那么**至少有两个东西**，才可以发生传播。单体不存在传播这个行为。
+
+   事务传播行为（propagation behavior）指的就是**当一个事务方法被另一个事务方法调用时，这个事务方法应该如何进行**。 
+   例如：methodA事务方法调用methodB事务方法时，methodB是继续在调用者methodA的事务中运行呢，还是为自己开启一个新事务运行，这就是由methodB的事务传播行为决定的。（注意：methodA和methodB不在同一个类中。）
+
+   Spring定义了七种传播行为：
+
+   ![img](images/SouthEast.png)
 
 2. **isolation**：事务隔离级别
 
-   有三个读问题：脏读，不可重复读，虚读（幻读）。
+   事务的特性有个叫隔离性，多十五操作之间不会产生影响。
 
+   但是如果不考虑隔离性的话，那么高并发的情况下会产生以下三个问题：
+   
+   **脏读**：A事务执行过程中，B事务读取了A事务的修改。但是由于某些原因，A事务可能没有完成提交，发生RollBack了操作，则B事务所读取的数据就会是不正确的
+   
+   ![img](images/42655-20190223001813296-1087539034.png)
+   
+   **不可重复读**：B事务读取了两次数据，在这两次的读取过程中A事务修改了数据，B事务的这两次读取出来的数据不一样
+   
+   ![微信截图_20190223004632](images/42655-20190223004727961-1817438360.png)
+   
+   **幻读**：B事务读取了两次数据，在这两次的读取过程中A事务添加了数据，B事务的这两次读取出来的集合不一样，这个流程看起来和不可重复读差不多，但**幻读强调的集合的增减**，而不是单独一条数据的修改。幻读产生的流程如下
+   
+   ![img](images/42655-20190223103301213-1545516085.png)
+   
    设置隔离级别，解决读问题：
 
 | 隔离级别                    | 脏读 | 不可重复读 | 幻读 |
@@ -609,14 +692,16 @@ c.在Service类里面方法上加事务注解 @Transactional.
 - 事务需要在一定时间内进行提交，超过时间后回滚。
 - 默认值是-1，设置时间以秒为单位
 
-   4.**readOnly**：是否只读
+
+​	4.**readOnly**：是否只读
 
 - 默认值为false，表示可以查询，也可以增删改。
 - 设置为true，只能查询。
 
-   4.**rollbackFor**：回滚，设置出现哪些异常进行事务回滚。
 
-   5.**noRollbackFor**：不回滚，设置出现哪些异常不进行事务回滚。
+​	4.**rollbackFor**：回滚，设置出现哪些异常进行事务回滚。
+
+​	5.**noRollbackFor**：不回滚，设置出现哪些异常不进行事务回滚。
 
 ```java
 @Service
