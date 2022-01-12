@@ -634,6 +634,37 @@ spring的@Transactional事务生效的一个前提是进行方法调用前经过
 Transactional是Spring提供的事务管理注解。
 重点在于，Spring采用**AOP**实现对bean的管理和切片，**它为我们的每个class生成一个代理对象**。**只有在代理对象之间进行调用时，可以触发切面逻辑**。而在同一个class中，方法B调用方法A，调用的是原对象的方法，**而不通过代理对象**。所以Spring无法切到这次调用，也就无法**通过注解保证事务性了**。**也就是说，在同一个类中的方法调用，则不会被方法拦截器拦截到，因此事务不会起作用**。
 
+为啥在这里方法B调用方法A不会通过代理对象？其实生成的代理类可以简要表示成
+
+```java
+public class SourceClass{
+    @Transactional
+    public void B(){
+        A();
+    }
+    
+    @Transactional
+    public void A(){
+        
+    }
+}
+
+public class ProxyClass extends SourceClass{
+    //通过spring内置的切面逻辑和动态代理的操作，在代理类中有个SourceClass的对象，该对象为普通对象，不是代理对象，并且通过Spring实例化和初始化后，普通对象是有值的。
+    private SourceClass target;
+    
+    //当调用代理类中的方法时,
+    public void B(){
+        //前置增强逻辑
+        
+        //调用的是普通对象的方法。所以本质是在普通对象里A()调用B()。
+        //普通对象里没有经过代理类，那么是不会处理这些注解的,因而这样调用的话会失效
+        target.A();
+        //后置增强逻辑
+    }
+}
+```
+
 **解决方案：**
 
 * 将事务方法放到另一个类中（或者单独开启一层，取名“事务层”）进行调用，即符合了在对象之间调用的条件
