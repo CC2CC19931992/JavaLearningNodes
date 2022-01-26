@@ -10,7 +10,18 @@
 
 ##### 1.理解bean
 
-**由Spring IoC容器所管理的对象称为bean**。bean被实例化，组装，并通过Spring IoC容器所管理的对象。Bean配置信息定义了Bean的实现及依赖关系，Spring容器根据各种形式的Bean配置信息在容器内部建立**Bean定义注册表**，然后**根据注册表加载、实例化Bean**，并建立**Bean和Bean的依赖关系**，最后将这些准备就绪的Bean放到**Bean缓存池**中，以供外层的应用程序进行调用
+**由Spring IoC容器所管理的对象称为bean**。bean被实例化，组装，并通过Spring IoC容器所管理的对象。Bean配置信息定义了Bean的实现及依赖关系，Spring容器根据各种形式的Bean配置信息在容器内部建立**Bean定义注册表**，然后**根据注册表加载、实例化Bean**，并建立**Bean和Bean的依赖关系**，最后将这些准备就绪的Bean放到**Bean缓存池**中，以供外层的应用程序进行调用。
+
+###### 1.1Ioc容器的创建过程：
+
+![preview](images/v2-9251a85fd83807034978e87896f90703_r.jpg)
+
+1.tomcat中的servletContext类中有注册ServletContextListener监听器。当ServletContext初始化的时候，会调用监听器。
+2.然后Tomcat会在web.xml找到ServletContextListener的实现类ContextLoaderListener[Spring里的],反射创建ContextLoaderListener,一旦进行了初始化的动作，就回通过监听器，调用里面重写的contextInitialized方法。
+3.读取Spring配置文件位置【在web.xml中配置了ContextLoaderListener监听器】
+4.找到spring-context.xml文件
+5.调用initWebApplicationContext方法完成IOC容器初始化
+6.完成容器刷新，推送上下文刷新完毕事件到监听器
 
 ##### 2.bean作用域
 
@@ -668,16 +679,29 @@ public class ProxyClass extends SourceClass{
 **解决方案：**
 
 * 将事务方法放到另一个类中（或者单独开启一层，取名“事务层”）进行调用，即符合了在对象之间调用的条件
-
 * 获取本对象的代理对象，再进行调用。具体操作如：
 
   1) Spring-content.xml上下文中，增加配置：<aop:aspectj-autoproxy expose-proxy="true"/>
 
   2) 在xxxServiceImpl中，用(xxxService)(AopContext.currentProxy())，获取到xxxService的代理类，再调用事务方法，强行经过代理类，激活事务切面。
-
 * 用@Autowired 注入自己 然后在用注入的bean调用自己的方法也可以
 
-###### 3.声明式事务管理的参数配置
+###### 3.分析事务的执行过程（*）
+
+@Transactional是Spring提供的事务管理注解。Spring通过反射识别到相关的注解的时候，会对该类进行处理(生成代理类并使用)：
+
+1.新建事务管理器，给事务管理器配置数据库连接，并设置连接的autoCommit属性为false,并将目标对象传给事务管理器
+2.在代理类中进行方法增加操作(事务提交 回滚 等操作)
+
+注意，都是在代理类中进行的。@Configuration注解能够帮助同一个线程下，拿到的DataSource是同一个。
+
+
+
+然后在执行的过程中采用AOP实现对于Bean的管理和切片，所以对于目标对象，Spring会生成一个代理类，如上面的代码所示的。然后在代理类中会有专门
+
+
+
+###### 4.声明式事务管理的参数配置
 
 1. **propagation**：事务传播行为，总共有7种
 
@@ -693,7 +717,7 @@ public class ProxyClass extends SourceClass{
 
 2. **isolation**：事务隔离级别
 
-   事务的特性有个叫隔离性，多十五操作之间不会产生影响。
+   事务的特性有个叫隔离性，多事务操作之间不会产生影响。
 
    但是如果不考虑隔离性的话，那么高并发的情况下会产生以下三个问题：
    
@@ -701,7 +725,7 @@ public class ProxyClass extends SourceClass{
    
    ![img](images/42655-20190223001813296-1087539034.png)
    
-   **不可重复读**：B事务读取了两次数据，在这两次的读取过程中A事务修改了数据，B事务的这两次读取出来的数据不一样
+   **不可重复读**：B事务读取了**两次**数据，在这两次的读取过程中A事务修改了数据，B事务的这两次读取出来的数据不一样
    
    ![微信截图_20190223004632](images/42655-20190223004727961-1817438360.png)
    
@@ -711,12 +735,26 @@ public class ProxyClass extends SourceClass{
    
    设置隔离级别，解决读问题：
 
-| 隔离级别                    | 脏读 | 不可重复读 | 幻读 |
-| --------------------------- | ---- | ---------- | ---- |
-| READ UNCOMMITED（读未提交） | 有   | 有         | 有   |
-| READ COMMITED（读已提交）   | 无   | 有         | 有   |
-| REPEATABLE READ（可重复读） | 无   | 无         | 有   |
-| SERIALIZABLE（串行化）      | 无   | 无         | 无   |
+| 隔离级别                          | 脏读 | 不可重复读 | 幻读 |
+| --------------------------------- | ---- | ---------- | ---- |
+| READ UNCOMMITED（读未提交）       | 有   | 有         | 有   |
+| READ COMMITED（读已提交）         | 无   | 有         | 有   |
+| REPEATABLE READ（可重复读）       | 无   | 无         | 有   |
+| SERIALIZABLE（串行化）            | 无   | 无         | 无   |
+| DEFAULT(使用数据库的默认隔离级别) |      |            |      |
+
+Spring 的事务隔离级别底层其实是基于数据库的，Spring 并没有自己的一套隔离级别。
+
+DEFAULT：使用数据库的默认隔离级别。
+
+READ_UNCOMMITTED：读未提交，最低的隔离级别，会读取到其他事务还未提交的内容，存在脏读。
+
+READ_COMMITTED：读已提交，读取到的内容都是已经提交的，可以解决脏读，但是存在不可重复读。
+
+REPEATABLE_READ：可重复读，在一个事务中多次读取时看到相同的内容，可以解决不可重复读，但是存在幻读。
+
+SERIALIZABLE：串行化，最高的隔离级别，对于同一行记录，写会加写锁，读会加读锁。在这种情况下，只有读读能并发执行，其他并行的读写、写读、写写操作都是冲突的，需要串行执行。可以防止脏读、不可重复度、幻读，没有并发事务问题。
+
 
 ​	3.**timeout**：超时时间
 
@@ -739,4 +777,10 @@ public class ProxyClass extends SourceClass{
 @Transactional(propagation = Propagation.REQUIRED,isolation = Isolation.READ_COMMITTED)
 public class AccountService {
 ```
+
+
+
+##### 8.循环依赖
+
+###### bean生命周期
 
