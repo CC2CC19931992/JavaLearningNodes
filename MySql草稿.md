@@ -562,7 +562,19 @@ WHERE t1.id <= t2.id ORDER BY t1.id desc LIMIT $pagesize;
 
 ##### Mysql语句执行顺序
 
-https://www.cnblogs.com/zhangbl55666/p/14279752.html
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dldGVyX2Ryb3A=,size_16,color_FFFFFF,t_70-164324719873914.png)
+
+* MySQL 主要分为 Server 层和引擎层，Server 层主要包括连接器、查询缓存、分析器、优化器、执行器，同时还有一个日志模块（binlog），这个日志模块所有执行引擎都可以共用,redolog 只有 InnoDB 有。
+
+* 引擎层是插件式的，目前主要包括，MyISAM,InnoDB,Memory 等。
+
+* SQL 等执行过程分为两类，一类对于查询等过程如下：权限校验--->查询缓存--->分析器--->优化器--->权限校验--->执行器--->引擎
+
+* 对于更新等语句执行流程如下：分析器--->权限校验--->执行器--->引擎—redo log prepare--->binlog--->redo log commit
+
+  原文链接：https://blog.csdn.net/weter_drop/article/details/93386581
+
+​						  https://www.cnblogs.com/zhangbl55666/p/14279752.html 【sql语句的执行顺序】
 
 ------
 
@@ -570,7 +582,7 @@ https://www.cnblogs.com/zhangbl55666/p/14279752.html
 
 事务的四个特性分别是[ACID]：原子性，一致性，隔离性，持久性
 
-原子性使用 undo log ，从而达到回滚；持久性：用 redo log，从而达到故障后恢复；隔离性使用锁以及MVCC,运用的优化思想有读写分离，读读并行，读写并行；一致性：通过回滚，以及恢复，和在并发环境下的隔离做到一致性。
+原子性使用 undo log ，从而达到回滚；持久性，用 redo log，从而达到故障后恢复；隔离性使用锁以及MVCC,运用的优化思想有读写分离，读读并行，读写并行；一致性：通过回滚，以及恢复，和在并发环境下的隔离做到一致性。
 
 https://www.cnblogs.com/ffdsj/p/12266539.html
 
