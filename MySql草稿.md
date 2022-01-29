@@ -28,7 +28,7 @@ DELETE：为删除的每一行保存当前系统版本号作为删除版本号�
 
 UPDATE：插入一条新数据，保存当前系统版本号作为创建版本号。同时保存当前系统版本号作为原来的数据行删除版本号。
 
-MVCC 只作用于 RC（Read Committed）和 RR（Repeatable Read）级别，因为 RU（Read Uncommitted）总是读取最新的数据版本，而不是符合当前事务版本的数据行。而 Serializable 则会对所有读取的行都加锁。这两种级别都不需要 MVCC 的帮助。
+MVCC **只作用于** RC（Read Committed）和 RR（Repeatable Read）级别，因为 RU（Read Uncommitted）总是读取最新的数据版本，而不是符合当前事务版本的数据行。而 Serializable 则会对所有读取的行都加锁。这两种级别都不需要 MVCC 的帮助。
 
 最初我也是坚信这个说法的，**但是后面发现在某些场景下这个说法其实有点问题**。
 
@@ -640,3 +640,11 @@ MySQL 5.7 中引入基于**组提交**的并行复制，其核心思想：一个
 ------
 
 ##### binlog，redolog，undolog
+
+------
+
+##### select count(*) from table执行慢的问题分析
+
+------
+
+##### mycat组件
