@@ -42,7 +42,7 @@ https://www.bilibili.com/video/BV1Vo4y1U76c?p=8
 一般dcl单例的写法
 
 ```java
-public void Singleton{
+public class Singleton{
     private static Singleton singleton;
     
     private int m = 8;
@@ -82,7 +82,7 @@ public void Singleton{
 这个时候我们加个volatile关键字 禁止指令重排序 就能解决这个问题 如下
 
 ```java
-public void Singleton{
+public class Singleton{
     private volatile static Singleton singleton;
     
     private int m = 8;
