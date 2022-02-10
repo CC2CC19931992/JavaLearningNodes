@@ -8,6 +8,38 @@ GC作用域是方法区和堆
 
 引用计数法，复制算法，标记清除算法，标记压缩算法
 
+##### 2.HotSpot GC的分类？
+
+针对HotSpot VM的实现，它里面的GC其实准确分类只有两大种：
+
+Partial GC：并不收集整个GC堆的模式，具体如下：
+
+​		Young GC/Minor GC：只收集新生代的GC。
+
+​		Old GC：只收集老年代的GC。只有CMS的concurrent collection是这个模式。
+
+​		Mixed GC：收集整个新生代以及部分老年代的GC，只有G1有这个模式。
+
+Full GC/Major GC：收集整个GC堆的模式，包括新生代、老年代、永久代（如果存在的话）或元空间等所有部分的模式
+
+##### 2.HotSpot GC的触发条件？
+
+这里只说常见的Young GC和Full GC。
+
+Young GC：当新生代中的Eden区没有足够空间进行分配时会触发Young GC。
+
+Full GC：
+
+1.当准备要触发一次Young GC时，如果发现统计数据说之前Young GC的平均晋升大小比目前老年代剩余的空间大，则不会触发Young GC而是转为触发Full GC。（通常情况）
+
+2.如果有永久代的话，在永久代需要分配空间但已经没有足够空间时，也要触发一次Full GC。
+
+3.System.gc()默认也是触发Full GC。
+
+4.heap dump带GC默认也是触发Full GC。
+
+5.CMS GC时出现Concurrent Mode Failure会导致一次Full GC的产生。
+
 ##### 3.GCRoots的理解
 
 **什么是垃圾？**
