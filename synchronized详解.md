@@ -141,7 +141,7 @@ synchronized 底层对应的 JVM 模型为 objectMonitor，使用了3个双向�
 
 当线程**获取锁失败**进入阻塞后，**首先**会被加入到 _**cxq 链表**，_**cxq 链表**的节点会在**某个时刻被进一步转移到 _EntryList 链表**。
 
-具体转移的时刻？见题目30。
+具体转移的时刻？见题目29。
 
 当持有锁的线程释放锁后，**_EntryList 链表头结点**的线程会**被唤醒**，该线程称为 successor（**假定继承者**），然后该线程**会尝试抢占锁**。
 
@@ -301,20 +301,349 @@ public class SynchronizedTest {
 
 6）性能上：随着近些年 synchronized 的不断优化，ReentrantLock 和 synchronized 在性能上已经没有很明显的差距了，所以性能不应该成为我们选择两者的主要原因。官方推荐尽量使用 synchronized，除非 synchronized 无法满足需求时，则可以使用 Lock。
 
-##### 19.认识 Java 对象头
+##### 19.synchronized 锁升级流程？
+
+核心流程如下图所示，请保存后放大查看，有一些概念看不懂很正常，会在文章后面陆续介绍，请继续往下看。
+
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164543435632711.png)
+
+##### 20.synchronized 的底层实现
+
+synchronized 的底层实现主要区分：方法和代码块，如下图例子。
+
+```java
+public class SynchronizedDemo {
+ 
+    private static final Object lock = new Object();
+ 
+    public static void main(String[] args) {
+        // 锁作用于代码块
+        synchronized (lock) {
+            System.out.println("hello word");
+        }
+    }
+ 
+    // 锁作用于方法
+    public synchronized void test() {
+        System.out.println("test");
+    }
+}
+```
+
+将该代码进行编译后，查看其字节码，核心代码如下：
+
+```cpp
+{
+  public com.joonwhee.SynchronizedDemo();
+    descriptor: ()V
+    flags: ACC_PUBLIC
+    Code:
+      stack=1, locals=1, args_size=1
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+         4: return
+      LineNumberTable:
+        line 9: 0
+ 
+  public static void main(java.lang.String[]);
+    descriptor: ([Ljava/lang/String;)V
+    flags: ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=2, locals=3, args_size=1
+         0: getstatic     #2                  // Field lock:Ljava/lang/Object;
+         3: dup
+         4: astore_1
+         5: monitorenter   // 进入同步块  
+         6: getstatic     #3                  // Field java/lang/System.out:Ljava/io/PrintStream;
+         9: ldc           #4                  // String hello word
+        11: invokevirtual #5                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        14: aload_1
+        15: monitorexit   // 退出同步块  
+        16: goto          24
+        19: astore_2
+        20: aload_1
+        21: monitorexit  // 退出同步块  
+        22: aload_2
+        23: athrow
+        24: return
+      Exception table:
+         from    to  target type
+             6    16    19   any
+            19    22    19   any
+ 
+ 
+  public synchronized void test();
+    descriptor: ()V
+    flags: ACC_PUBLIC, ACC_SYNCHRONIZED  // ACC_SYNCHRONIZED 标记
+    Code:
+      stack=2, locals=1, args_size=1
+         0: getstatic     #3                  // Field java/lang/System.out:Ljava/io/PrintStream;
+         3: ldc           #6                  // String test
+         5: invokevirtual #5                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+         8: return
+      LineNumberTable:
+        line 20: 0
+        line 21: 8
+}
+```
+
+synchronized 修饰**代码块**时，编译后会生成  **monitorenter** 和 **monitorexit** 指令，分别对应进入同步块和退出同步块。可以看到**有两个 monitorexit**，这是因为编译时 **JVM 为代码块添加了隐式的 try-finally**，**在 finally 中进行了锁释放**，这也是为什么 **synchronized 不需要手动释放锁**的原因。
+
+synchronized 修饰方法时，编译后会生成 **ACC_SYNCHRONIZED** 标记，当方法调用时，调用指令将会检**查方法的 ACC_SYNCHRONIZED 访问标志是否被设置**，如果设置了则会**先尝试获得锁**。 
+
+两种实现其实本质上没有区别，只是**方法的同步**是一种**隐式**的方式来实现，**无需通过字节码**来完成.
+
+##### 21.对象的内存布局和对象头
+
+在介绍 Mark Word 之前，需要先了解对象的内存布局。 HotSpot 中，对象在堆内存中的存储布局可以分为三部分：对象头（Header）、实例数据（Instance Data）、对齐填充（Padding）。
+
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164549895046218.png)
+
+###### 1.对象头(Header)
+
+主要包含两类信息：Mark Word 和 类型指针。
+
+Mark Word 记录了对象的运行时数据，例如：HashCode、GC分代年龄、偏向标记、锁标记、偏向的线程ID、偏向纪元（epoch）等，32 位的 markword 如下图所示。
 
 Java 对象头最多由三部分构成：
 
 1. `MarkWord`
-2. ClassMetadata Address  [对象的Class信息，存储对象的class地址【元空间中】]
+2. ClassMetadata Address  [类型指针，对象的Class信息，存储对象的class地址【元空间中】]
 3. Array Length （**如果对象是数组才会有这部分**）
 
 其中 `Markword` 是保存锁状态的关键，对象锁状态可以从偏向锁升级到轻量级锁，再升级到重量级锁，加上初始的无锁状态，可以理解为有 4 种状态。想在一个对象中表示这么多信息自然就要用`位`存储，在 64 位操作系统中，是这样存储的（**注意颜色标记**）,下面是对象头的结构
 
 ![img](images/02fb2dfdec534a0ca4a7a8fe24c2b097-164543499216614.png)
 
-##### 20.synchronized 锁升级流程？
+32 位的 markword 如下图所示
 
-核心流程如下图所示，请保存后放大查看，有一些概念看不懂很正常，会在文章后面陆续介绍，请继续往下看。
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164549917849420.png)
 
-![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164543435632711.png)
+类型指针【ClassMetadata Address】，指向它的**类型元数据的指针**，**Java 虚拟机通过这个指针来确定该对象时哪个类的实例**。如果对象是数组，则需要有一个用于记录数组长度的数据。
+
+###### 2.实例数据（Instance Data）
+
+对象存储的真正有效信息，即我们在代码里定义的各种类型的字段内容。
+
+###### 3.对齐填充（Padding）
+
+Hotspot 要求对象的大小必须是8字节的整数倍，因此，如果实例数据不是8字节的整数倍时，需要通过该字段进行填充。
+
+##### 22.介绍下 Lock Record？
+
+锁记录，这个大家应该都听过，用于**偏向锁优化和轻量级锁优化**时**暂存锁对象的 markword**。
+
+Lock Record 在源码中为 BasicObjectLock，源码如下：
+
+```cpp
+class BasicObjectLock VALUE_OBJ_CLASS_SPEC {
+ private:
+  BasicLock _lock;
+  oop       _obj;
+};
+class BasicLock VALUE_OBJ_CLASS_SPEC {
+ private:
+  volatile markOop _displaced_header; 
+};
+```
+
+其实就两个属性：
+
+1）_displaced_header：用于轻量级锁中**暂存锁对象的 markword**，也称为 displaced mark word。
+
+2）_obj：**指向锁对象**。
+
+Lock Record 除了用于暂存 markword 之外，还有一个重要的功能是用于**实现锁重入的计数器**，当每次锁重入时，会用一个 Lock Record 来记录，但是此时 _displaced_header 为 null。
+
+这样在解锁的时候，每解锁1次，就移除1个 Lock Record。移除时，判断 _displaced_header 是否为 null。如果是，则代表是锁重入，则不会执行真正的解锁；否则，代表这是最后一个 Lock Record，此时会真正执行解锁操作。 
+
+##### 23.什么是匿名偏向？
+
+所谓的匿名偏向是指该**锁从未被获取过**，也就是**第一次偏向**，此时的特点是锁对象 **markword 的线程 ID 为0**。
+
+当第一个线程获取偏向锁后，**线程ID会从0修改为该线程的 ID**，之后该线程 ID 就不会为0了，**因为释放偏向锁不会修改线程 ID**。
+
+这也是为什么说**偏向锁适用于**：**只有一个线程获取锁的场景**。
+
+##### 24.偏向锁模式下 hashCode 存放在哪里？
+
+偏向锁状态下是**没有地方存放 hashCode** 的。
+
+因此，当**一个对象已经计算过 hashCode 之后**，**就再也无法进入偏向锁状态了**。
+
+如果**一个对象当前正处于偏向锁状态**，**收到需要计算其 hashCode 的请求**时（Object::hashCode()或者System::identityHashCode（Object）方法的调用），**它的偏向锁状态就会立即被撤销**。
+
+##### 25.偏向锁加锁解锁流程
+
+首先，在开启偏向锁的时候，对象创建后，其偏向锁标记位为1。如果没开启偏向锁，对象创建后，其偏向锁标记位为0。
+
+加锁流程：
+
+1）从当前线程的**栈帧**中寻找一个空闲的 **Lock Record**，**将 obj 属性指向当前锁对象**。
+
+2）获取偏向锁时，会先进行各种判断，如加锁流程图所示，最终只有两种场景能尝试获取锁：**匿名偏向、批量重偏向**。
+
+3）使用 **CAS** 尝试将**自己的线程 ID 填充到锁对象 markword 里**，**修改成功则获取到锁**。
+
+4）如果不是步骤2的两种场景，**或者 CAS 修改失败，则会撤销偏向锁，并升级为轻量级锁**。
+
+5）如果线程成功获取偏向锁，之后每次进入该同步块时，**只需要简单的判断锁对象 markword 里的线程ID是否是自己**，如果是则直接进入，几乎没有额外开销。
+
+解锁流程：
+
+偏向锁的解锁很简单，**就是将Lock Record的 obj 属性赋值为 null**，这边很重要的点是**不会将锁对象 markword 的线程ID还原回0**。
+
+偏向锁流程中，markword 的状态变化如下图所示：
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164550036661322.png)
+
+##### 26.批量重偏向、批量撤销？启发式算法？
+
+上面我们提到了**批量重偏向**，与批量重偏向同时被引入的还有**批量撤销**，官方统称两者为 **“启发式算法**”。
+
+###### **为什么引入启发式算法？**
+
+从上面的介绍我们知道，当只有一个线程获取锁时，偏向锁只需在第一次进入同步块时执行一次 CAS 操作，之后每次进入只需要简单的判断即可，此时的开销基本可以忽略。**因此在只有一个线程获取锁的场景中，偏向锁的性能提升是非常可观的**。
+
+但是如果有**其他线程尝试获得锁时**，此时需要将**偏向锁撤销为无锁状态**或者**升级为轻量级锁**。偏向锁的撤销是有一定成本的（撤销后会升级），如果我们的使用场景存在多线程竞争导致大量偏向锁撤销，那偏向锁反而会导致性能下降。
+
+JVM 开发人员通过分析得出以下两个观点：
+
+场景1：**对于某些对象，偏向锁显然是无益的**。例如**涉及两个或更多线程的生产者-消费者队列**。这样的**对象必然有锁竞争**，而且在程序执行过程中可能会分配许多这样的对象。
+
+该观点描述的是**锁竞争比较多**的场景，对这种场景，**一种简单粗暴的方法是直接禁用偏向锁**，但是这种方式并不是最优的。
+
+因为在整个服务中，可能只有一小部分是这种场景，因为这一小部分场景而直接放弃偏向锁的优化，显然是不划算的。最理想的情况下是能够识别这样的对象，并只为它们禁用偏向锁。
+
+**批量撤销就是对该场景的优化。**
+
+场景2：在某些情况下，将一组对象重新偏向另一个线程是有好处的。特别是当一个线程分配了许多对象并对每个对象执行了初始同步操作，但另一个线程对它们执行了后续工作。
+
+我们知道**偏向锁的设计初衷是用于只有一个线程获取锁的场景**。该观点中后半部分其实是符合这场场景的，但是由于前半部分而导致不能享受偏向锁带来的好处，因此 JVM 开发人员要做的就是识别出这种场景，并进行优化。
+
+对于这种场景，官方引入了批量重偏向来进行优化。
+
+###### **批量重偏向**
+
+JVM 选择以 class 为粒度，为**每一个 class 维护了一个偏向锁撤销计数器**。每当**该 class的对象** 发生偏向锁撤销的时候，计数器值+1。
+
+当计数器的值**超过批量重偏向的阈值**（默认20）的时候，JVM 认为此时命中了上述的场景2，就会对**整个 class的对象** 进行批量重偏向。
+
+每个 class 都会有 markword，当处于偏向锁状态时，markword 会有 epoch 属性，当**创建**该 class 的**实例对象**时，**实例对象的 epoch 值会赋值为 class 的 epoch 值**，也就是说正常情况下，**实例对象的 epoch 和 class 的 epoch 是相等的**。
+
+而当发生批量重偏向时，epoch 就派上用场了。
+
+当发生批量重偏向时，首先会将 **class 的 epoch 值+1**，接着**遍历所有当前存活的线程的栈**，找到该 **class 所有正处于偏向锁状态**的**锁实例对象**， **将其epoch 值修改为新值**。
+
+而那些当前没有**被任何线程持有的锁实例对象**，其 **epoch 值**则**没有**得到**更新**，此时会比 class 的 epoch 值小1。在下一次其他线程准备获取该锁对象的时候，**不会因为该锁对象的线程ID不为0**（也就是曾经被其他线程获取过），而**直接升级为轻量级锁**，而是**使用 CAS 来尝试获取偏向锁**，**从而达到批量重偏向的优化效果**。
+
+PS：对应了加锁流程图中的 “**锁对象的epoch等于class的epoch**” 的选择框。
+
+###### **批量撤销**
+
+批量撤销是**批量重偏向**的**后续流程**，同样是以 class 为粒度，同样使用偏向撤销计数器。
+
+当批量重偏向后，每次进行**偏向撤销**时，会计算**本次撤销时间**和**上一次撤销时间**的**间隔**，如果两次撤销时间的间隔**超过指定时间**（25秒），则此时 JVM 会认为**批量重偏向是有效果的**，**因为此时偏向撤销的频率很低**，所以会将**偏向撤销计数器重置为0**。
+
+而当批量重偏向后，偏向计数器的值**继续快速增加**，**当计数器的值超过批量撤销的阈值**（默认40）时，**JVM 认为该 class 的实例对象**存在明显的**锁竞争**，**不适合使用偏向锁**，**则会触发批量撤销操作**。
+
+批量撤销：将 class 的 markword 修改为**不可偏向无锁状态**，也就是偏向标记位为0，锁标记位为01。接着**遍历所有当前存活的线程的栈**，找到该**class 所有正处于偏向锁状态的锁实例对象**，**执行偏向锁的撤销操作**。
+
+这样当线程后续尝试获取该 class 的锁实例对象时，会发现锁对象的 **class 的 markword 不是偏向锁状态**，知道该 **class 已经被禁用偏向锁**，从而直接进入**轻量级锁流程**。
+
+PS：对应了加锁流程图中的 “**锁对象的class是否为偏向模式？**” 的选择框。
+
+##### 27.轻量级锁流程
+
+###### 加锁：
+
+如果**关闭偏向锁**，或者**偏向锁升级**，则会进入轻量级锁加锁流程。
+
+1）从当前线程的栈帧中寻找一个空闲的 **Lock Record**，obj 属性指向锁对象。
+
+2）将锁对象的 markword 修改为**无锁状态**，填充到 Lock Rrcord 的 displaced_header 属性。
+
+3）使用 CAS 将**对象头**的 **markword** 修改为指向 **Lock Record 的指针**
+
+此时的线程栈和锁对象的关系如下图所示，可以看到2次锁重入的 displaced_header 填充的是 null。
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164551307731024.png)
+
+###### 解锁：
+
+1）将 Lock Record 的 obj 属性赋值为 null。
+
+2）使用 CAS 将 displaced_header 属性暂存的 displaced mark word 还原回锁对象的 markword。
+
+##### 28.重量级锁流程
+
+###### 加锁：
+
+当**轻量级锁出现竞争时**，**会膨胀成重量级锁**。
+
+1）分配一个 **ObjectMonitor**，并填充相关属性。
+
+2）将锁对象的 markword 修改为：该 ObjctMonitor 地址 + 重量级锁标记位（10）
+
+3）尝试获取锁，如果失败了则尝试**自旋获取锁**
+
+4）如果多次尝试后还是失败，则将该线程封装成 **ObjectWaiter**，插入到 **cxq** 链表中，当前线程进入**阻塞状态**
+
+5）当其他锁释放时，会唤醒链表中的节点，被唤醒的节点会再次尝试获取锁，获取成功后，将自己从 cxq（EntryList）链表中移除
+
+此时的线程栈、锁对象、ObjectMonitor 之间的关系如下图所示：
+![img](images/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3YxMjM0MTE3Mzk=,size_16,color_FFFFFF,t_70-164551342853026.png)
+
+ObjectMonitor 的核心属性如下：
+
+```cpp
+ObjectMonitor() {
+    _header       = NULL; // 锁对象的原始对象头
+    _count        = 0;    // 抢占该锁的线程数，_count大约等于 _WaitSet线程数 + _EntryList线程数
+    _waiters      = 0,    // 调用wait方法后的等待线程数
+    _recursions   = 0;    // 锁的重入数
+    _object       = NULL; // 指向锁对象指针
+    _owner        = NULL; // 当前持有锁的线程
+    _WaitSet      = NULL; // 存放调用wait()方法的线程
+    _WaitSetLock  = 0 ;   // 操作_WaitSet链表的锁
+    _Responsible  = NULL ;
+    _succ         = NULL ;  // 假定继承人
+    _cxq          = NULL ;  // 等待获取锁的线程链表，竞争锁失败后会被先放到cxq链表，之后再进入_EntryList链接
+    FreeNext      = NULL ;  // 指向下一个空闲的ObjectMonitor
+    _EntryList    = NULL ;  // 等待获取锁的线程链表，该链表的头结点是获取锁的第一候选者
+    _SpinFreq     = 0 ;
+    _SpinClock    = 0 ;
+    OwnerIsThread = 0 ; // 标记_owner是指向占用当前锁的线程的指针还是BasicLock，1为线程，0为BasicLock，发生在轻锁升级重锁的时候
+    _previous_owner_tid = 0;  // 监视器上一个所有者的线程id
+  }
+```
+
+###### 解锁：
+
+1）将重入计数器-1，ObjectMonitor 里的 _recursions 属性。
+
+2）先释放锁，将锁的持有者 owner 属性赋值为 null，此时其他线程已经可以获取到锁，例如自旋的线程。
+
+3）从 EntryList 或 cxq 链表中唤醒下一个线程节点。
+
+##### 29._cxq 链表和 _EntryList 链表的排队策略？
+
+上文说道，“_cxq 链表的节点会在某个时刻被进一步转移到 _EntryList 链表”，那到底是什么时刻了？
+
+通常来说，可以认为是**在持有锁的线程释放锁时**，该线程需要去唤醒链表中的下一个线程节点，此时如果检查到 _EntryList 为空，并且 _cxq 不为空时，会将 _cxq 链表的节点转移到 _EntryList 中。
+
+不过也不全是这样，_cxq 链表和 _EntryList 链表的排队策略（QMode）和执行顺序如下：
+
+1）当 QMode = 2 时，此时 _cxq 比 EntryList 优先级更高，如果此时 _cxq 不为空，则会首先唤醒 _cxq 链表的头结点。**除了 QMode = 2 之外**，其他模式都是唤醒 _EntryList 的头结点。 
+
+2）当 QMode = 3 时，无论 _EntryList 是否为空，都会直接将 _cxq 链表中的节点转移到 _EntryList 链表的**末尾**。
+
+3）当 QMode = 4 时，无论 _EntryList 是否为空，都会直接将 _cxq 链表中的节点转移到 _EntryList 链表的**头部**。
+
+4）执行到这边，如果 _EntryList 不为空，则直接唤醒 _EntryList 的头结点并返回，如果此时 _EntryList 为空，则继续执行。
+
+5）执行到这边，代表此时 _EntryList 为空。
+
+6）当 QMode = 1 时，将 _cxq 链表的节点转移到 _EntryList 中，并且调换顺序，也就是原来在_cxq 头部，会变到 _EntryList 尾部。
+
+7）剩余情况，将 _cxq 链表的节点转移到 _EntryList 中，并且节点顺序一致。
+
+8）如果此时 _EntryList 不为空，则唤醒 _EntryList 的头结点。
